@@ -15,12 +15,13 @@
 # limitations under the License.
 """Example using TF Lite to detect objects with the Raspberry Pi camera."""
 
-from AWSIoTPythonSDK.MQTTLib import AWSIoTMQTTClient
-from pymongo import MongoClient
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+
+from AWSIoTPythonSDK.MQTTLib import AWSIoTMQTTClient
+from pymongo import MongoClient
 import argparse
 import io
 import re
@@ -37,6 +38,15 @@ from tflite_runtime.interpreter import Interpreter
 
 CAMERA_WIDTH = 640
 CAMERA_HEIGHT = 480
+
+
+# Custom MQTT message callback
+def customCallback(client, userdata, message):
+    print("Received a new message: ")
+    print(message.payload)
+    print("from topic: ")
+    print(message.topic)
+    print("--------------\n\n")
 
 
 def load_labels(path):
@@ -64,8 +74,7 @@ def get_output_tensor(interpreter, index):
   """Returns the output tensor at the given index."""
   output_details = interpreter.get_output_details()[index]
   tensor = np.squeeze(interpreter.get_tensor(output_details['index']))
-  return tensor
-
+  return tensor 
 
 def detect_objects(interpreter, image, threshold):
   """Returns a list of detection results, each a dictionary of object info."""
@@ -108,20 +117,32 @@ def annotate_objects(annotator, results, labels):
 
 
 def main():
+    
+  AllowedActions = ['publish']
+
+
   parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument('--model', help='File path of .tflite file.', required=True)
   parser.add_argument('--labels', help='File path of labels file.', required=True)
   parser.add_argument('--threshold', help='Score threshold for detected objects.', required=False, type=float, default=0.4)
+  
   parser.add_argument("-e", "--endpoint", action="store", required=True, dest="host", help="Your AWS IoT custom endpoint")
   parser.add_argument("-r", "--rootCA", action="store", required=True, dest="rootCAPath", help="Root CA file path")
   parser.add_argument("-c", "--cert", action="store", dest="certificatePath", help="Certificate file path")
   parser.add_argument("-k", "--key", action="store", dest="privateKeyPath", help="Private key file path")
   parser.add_argument("-p", "--port", action="store", dest="port", type=int, help="Port number override")
+  parser.add_argument("-w", "--websocket", action="store_true", dest="useWebsocket", default=False,
+                        help="Use MQTT over WebSocket")
   parser.add_argument("-id", "--clientId", action="store", dest="clientId", default="sensorPub",
-                      help="Targeted client id")
+                        help="Targeted client id")
   parser.add_argument("-t", "--topic", action="store", dest="topic", default="home", help="Targeted topic")
+  parser.add_argument("-m", "--mode", action="store", dest="mode", default="publish",
+                        help="Operation modes: %s"%str(AllowedActions))
+  parser.add_argument("-M", "--message", action="store", dest="message", default="Hello World!",
+                        help="Message to publish")
   parser.add_argument("-d", "--dbMongo", action="store", required=True, dest="dbMongo", 
-                      help="Provide the mongoDB client key to store sensor data",)
+                        help="Provide the mongoDB client key to store sensor data",)
+
   args = parser.parse_args()
 
   labels = load_labels(args.labels)
@@ -137,9 +158,29 @@ def main():
   port = args.port
   clientId = args.clientId
   topic = args.topic
+  useWebsocket = args.useWebsocket
+  
+  if args.mode not in AllowedActions:
+    parser.error("Unknown --mode option %s. Must be one of %s" % (args.mode, str(AllowedActions)))
+    exit(2)
+
+  if args.useWebsocket and args.certificatePath and args.privateKeyPath:
+    parser.error("X.509 cert authentication and WebSocket are mutual exclusive. Please pick one.")
+    exit(2)
+
+  if not args.useWebsocket and (not args.certificatePath or not args.privateKeyPath):
+    parser.error("Missing credentials for authentication.")
+    exit(2)
+
+  # Port defaults
+  if args.useWebsocket and not args.port:  # When no port override for WebSocket, default to 443
+    port = 443
+  if not args.useWebsocket and not args.port:  # When no port override for non-WebSocket, default to 8883
+    port = 8883
+      
 
   #Connect to AWS IoT Core
-  myMQTTClient = AWSIoTMQTTClient("rpi-sensor") #random key, if another connection using the same key is opened the previous one is auto closed by AWS IOT
+  myMQTTClient = AWSIoTMQTTClient("rpi-camera") #random key, if another connection using the same key is opened the previous one is auto closed by AWS IOT
   myMQTTClient.configureEndpoint(host, port)
   myMQTTClient.configureCredentials(rootCAPath, privateKeyPath, certificatePath)
   myMQTTClient.configureOfflinePublishQueueing(-1) # Infinite offline Publish queueing
@@ -162,10 +203,8 @@ def main():
             (input_width, input_height), Image.ANTIALIAS)
         start_time = time.monotonic()
         results = detect_objects(interpreter, image, args.threshold)
+        boxes = get_output_tensor(interpreter, 0)
         elapsed_ms = (time.monotonic() - start_time) * 1000
-
-        messageJSON(results)
-        myMQTTClient.publish(topic, messageJSON, 1)
 
         annotator.clear()
         annotate_objects(annotator, results, labels)
@@ -174,6 +213,12 @@ def main():
 
         stream.seek(0)
         stream.truncate()
+        
+#         Publish JSON data
+
+        data = boxes.tolist()
+        messageJSON= json.dumps(data)
+        myMQTTClient.publish(topic, messageJSON, 1)
 
     finally:
       camera.stop_preview()
