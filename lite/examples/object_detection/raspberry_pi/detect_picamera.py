@@ -27,6 +27,7 @@ import io
 import re
 import time
 import json
+import pprint
 
 from annotation import Annotator
 
@@ -114,8 +115,43 @@ def annotate_objects(annotator, results, labels):
     annotator.bounding_box([xmin, ymin, xmax, ymax])
     annotator.text([xmin, ymin],
                    '%s\n%.2f' % (labels[obj['class_id']], obj['score']))
-
-
+    
+def findPoints(coordinates):
+    
+    for coordinate in coordinates :
+    
+        ymin = coordinate[0]
+        xmin = coordinate[1]
+        ymax = coordinate[2]
+        xmax = coordinate[3]
+        
+        x = xmin / xmax
+        y = ymin / ymax
+        
+        point = [x,y]
+        
+        return point
+    
+def findLabels(results, labels):
+    
+    for result in results :
+    
+        class_id = result.get('class_id')
+        
+        label = labels[class_id]
+        
+        return label
+    
+    
+def findScore(results, labels):
+    
+    for result in results :
+    
+        score= result.get('score')
+        
+        return score
+    
+    
 def main():
     
   AllowedActions = ['publish']
@@ -192,7 +228,7 @@ def main():
 
   with picamera.PiCamera(
       resolution=(CAMERA_WIDTH, CAMERA_HEIGHT), framerate=30) as camera:
-    camera.start_preview()
+#     camera.start_preview()
     try:
       stream = io.BytesIO()
       annotator = Annotator(camera)
@@ -213,16 +249,27 @@ def main():
 
         stream.seek(0)
         stream.truncate()
-
-        #Publish data to AWS IoT
+        
+        #Prepare data to semd
+        
+        coordinates = boxes.tolist()
+        
+        point = findPoints(coordinates)
+        
+        label = findLabels(results,labels)
+        
+        score = findScore(results, labels)
+        
+        #Publish data to AWS IoT  ymin, xmin, ymax, xmax 
         post = {
           "Sensor Name":"CameraPi",
-          "Object_ID":"0",
-          "Coordinates":"0,0",
-          "Class_ID":"none"
+          "Score":str(score),
+          "Coordinates":point,
+          "Class_ID":str(label)
         }
-
-        data = boxes.tolist()
+        
+        pprint.pprint(post)
+        
         messageJSON= json.dumps(post)
         myMQTTClient.publish(topic, messageJSON, 1)
 
