@@ -213,12 +213,20 @@ def main():
 
         stream.seek(0)
         stream.truncate()
-        
-#         Publish JSON data
+
+        #Publish data to AWS IoT
+        post = {
+          "Sensor Name":"CameraPi",
+          "Object_ID":"0",
+          "Coordinates":"0,0",
+          "Class_ID":"none"
+        }
 
         data = boxes.tolist()
-        messageJSON= json.dumps(data)
+        messageJSON= json.dumps(post)
         myMQTTClient.publish(topic, messageJSON, 1)
+
+        time.sleep(1)
 
     finally:
       camera.stop_preview()
