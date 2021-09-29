@@ -263,9 +263,9 @@ def main():
         #Publish data to AWS IoT  ymin, xmin, ymax, xmax 
         post = {
           "Sensor Name":"CameraPi",
-          "Score":str(score),
           "Coordinates":point,
-          "Class_ID":str(label)
+          "Label":str(label),
+          "Score":str(score)
         }
         
         pprint.pprint(post)
