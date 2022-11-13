@@ -15,16 +15,17 @@
 import argparse
 import sys
 import time
-
+import json
 import cv2
 from tflite_support.task import core
 from tflite_support.task import processor
 from tflite_support.task import vision
 import utils
+import paho.mqtt.client as mqtt
 
 
 def run(model: str, camera_id: int, width: int, height: int, num_threads: int,
-        enable_edgetpu: bool) -> None:
+        enable_edgetpu: bool, ip_adress: str, topic: str) -> None:
   """Continuously run inference on images acquired from the camera.
 
   Args:
@@ -35,6 +36,11 @@ def run(model: str, camera_id: int, width: int, height: int, num_threads: int,
     num_threads: The number of CPU threads to run the model.
     enable_edgetpu: True/False whether the model is a EdgeTPU model.
   """
+  
+  #Connet to MQTT
+  mqttc = mqtt.Client()
+  mqttc.connect(ip_adress, 1883)
+  print("Connected to ", ip_adress)
 
   # Variables to calculate FPS
   counter, fps = 0, 0
@@ -81,6 +87,28 @@ def run(model: str, camera_id: int, width: int, height: int, num_threads: int,
 
     # Run object detection estimation using the model.
     detection_result = detector.detect(input_tensor)
+
+    for detection in detection_result.detections:
+      # Draw bounding_box
+      bbox = detection.bounding_box
+      start_point = [bbox.origin_x, bbox.origin_y]
+      end_point = [bbox.origin_x + bbox.width, bbox.origin_y + bbox.height]
+      
+      #Publish data to AWS IoT  [ymin, xmin], [ymax, xmax] 
+      points = []
+      points.append(start_point)
+      points.append(end_point)
+      category = detection.categories[0]
+      post = {
+          "Sensor Name":"CameraPi",
+          "Coordinates":points,
+          "Label":str(category.category_name),
+          "Score":str(round(category.score, 2))
+        }
+      
+      messageJSON = json.dumps(post)
+      mqttc.publish(topic, str(messageJSON))
+      
 
     # Draw keypoints and edges on input image
     image = utils.visualize(image, detection_result)
@@ -140,10 +168,21 @@ def main():
       action='store_true',
       required=False,
       default=False)
+  parser.add_argument(
+    '-i', '--ip_adress',
+    type=str,
+    help='The I.P of the MQTT server.',
+    required=True)
+  parser.add_argument(
+    '-t',
+    '--topic',
+    type=str,
+    default="sensors",
+    help="MQTT topic to publish the data.")
   args = parser.parse_args()
 
   run(args.model, int(args.cameraId), args.frameWidth, args.frameHeight,
-      int(args.numThreads), bool(args.enableEdgeTPU))
+      int(args.numThreads), bool(args.enableEdgeTPU), str(args.ip_adress), str(args.topic))
 
 
 if __name__ == '__main__':
