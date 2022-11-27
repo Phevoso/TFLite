@@ -106,10 +106,11 @@ def run(model: str, camera_id: int, width: int, height: int, num_threads: int,
           "Label":str(category.category_name),
           "Score":str(round(category.score, 2))
         }
-      pprint.pprint(post)
       
-      messageJSON = json.dumps(post)
-      mqttc.publish(topic, str(messageJSON))
+      if category.category_name == "person":
+        pprint.pprint(post)        
+        messageJSON = json.dumps(post)
+        mqttc.publish(topic, str(messageJSON))
 
   cap.release()
   cv2.destroyAllWindows()
