@@ -106,7 +106,7 @@ def run(model: str, camera_id: int, width: int, height: int, num_threads: int,
           "Label":str(category.category_name),
           "Score":str(round(category.score, 2))
         }
-      print(pprint)
+      pprint.pprint(post)
       
       messageJSON = json.dumps(post)
       mqttc.publish(topic, str(messageJSON))
